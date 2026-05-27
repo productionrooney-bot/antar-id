@@ -17,30 +17,33 @@ exports.handler = async function (event, context) {
   }
 
   try {
-    const { message, history } = JSON.parse(event.body);
+    const body = JSON.parse(event.body);
+    const message = body.message;
+    const history = body.history || [];
 
     if (!message) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Message required" }),
+        body: JSON.stringify({ reply: "❌ DEBUG: Pesan kosong tidak diterima." }),
       };
     }
 
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+    // DEBUG: Cek apakah API key ada
     if (!GEMINI_API_KEY) {
       return {
-        statusCode: 500,
+        statusCode: 200,
         headers,
-        body: JSON.stringify({ error: "API key not configured" }),
+        body: JSON.stringify({ reply: "❌ DEBUG: GEMINI_API_KEY tidak ditemukan di environment variables. Pastikan sudah diset di Netlify." }),
       };
     }
 
-    const AREA = "Yosowilangun, Lumajang, Jawa Timur";
-    const ONGKIR_PER_KM = 2000;
-    const BIAYA_LAYANAN = 1000;
+    // DEBUG: Konfirmasi key ada (tampilkan 6 karakter pertama saja)
+    const keyPreview = GEMINI_API_KEY.substring(0, 6) + "...";
 
-    const SYSTEM_PROMPT = `Kamu adalah asisten virtual untuk layanan lokal bernama "Antar.id" yang beroperasi di area ${AREA}.
+    const SYSTEM_PROMPT = `Kamu adalah asisten virtual untuk layanan lokal bernama "Antar.id" yang beroperasi di area Yosowilangun, Lumajang, Jawa Timur.
 
 LAYANAN YANG TERSEDIA:
 1. 🛵 OJEK — antar jemput penumpang ke tujuan mana saja di area Yosowilangun
@@ -49,29 +52,24 @@ LAYANAN YANG TERSEDIA:
 4. 📦 KIRIM PAKET — kirim dokumen, barang, atau paket lokal antar area Yosowilangun
 
 TARIF SEMUA LAYANAN:
-- Rp ${ONGKIR_PER_KM.toLocaleString("id-ID")}/km + biaya layanan Rp ${BIAYA_LAYANAN.toLocaleString("id-ID")}
+- Rp 2.000/km + biaya layanan Rp 1.000 per order
 - Minimum order: Rp 3.000
-- Contoh: 2 km = (2 × 2.000) + 1.000 = Rp 5.000
+- Contoh: 2 km = (2 x 2.000) + 1.000 = Rp 5.000
 
 CARA KERJA ANTAR MAKANAN & BELANJA:
 - Kurir konfirmasi harga via FOTO saat tiba di lokasi
 - User bayar setelah melihat foto harga (transparan, tidak ada markup tersembunyi)
 - Bayar langsung ke kurir saat terima pesanan (COD)
 
-PENTING — CARA MERESPONS:
+PENTING:
 - Gunakan bahasa Indonesia yang santai, ramah, dan friendly
-- Maksimal 120 kata per respons agar ringkas di mobile
-- Jika user menyebut lokasi atau tujuan, sebutkan estimasi jarak dan ongkir
-- Untuk ojek: tanya lokasi jemput & tujuan
-- Untuk antar makanan: tanya mau pesan apa & lokasi user
-- Untuk belanja: tanya mau beli apa & di toko/pasar mana
-- Untuk kirim paket: tanya lokasi pengirim & penerima
+- Maksimal 120 kata per respons
 - Selalu akhiri dengan ajakan konfirmasi order via WhatsApp
 - JANGAN jawab pertanyaan di luar konteks layanan Antar.id`;
 
-    // Build conversation history for Gemini
+    // Build conversation history
     const contents = [];
-    if (history && Array.isArray(history)) {
+    if (Array.isArray(history)) {
       history.forEach((msg) => {
         contents.push({
           role: msg.role === "ai" ? "model" : "user",
@@ -81,7 +79,7 @@ PENTING — CARA MERESPONS:
     }
     contents.push({ role: "user", parts: [{ text: message }] });
 
-    const response = await fetch(
+    const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
@@ -97,11 +95,16 @@ PENTING — CARA MERESPONS:
       }
     );
 
-    if (!response.ok) {
-      throw new Error(`Gemini API error: ${response.status}`);
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ reply: `❌ DEBUG: Gemini API error ${geminiRes.status}. Detail: ${errText.substring(0, 200)}` }),
+      };
     }
 
-    const data = await response.json();
+    const data = await geminiRes.json();
     const reply =
       data.candidates?.[0]?.content?.parts?.[0]?.text ||
       "Maaf, ada gangguan sebentar. Silakan coba lagi atau hubungi kami via WhatsApp ya!";
@@ -111,15 +114,12 @@ PENTING — CARA MERESPONS:
       headers,
       body: JSON.stringify({ reply }),
     };
+
   } catch (err) {
-    console.error("Function error:", err);
     return {
-      statusCode: 500,
+      statusCode: 200,
       headers,
-      body: JSON.stringify({
-        reply:
-          "😅 Ups, ada gangguan teknis. Coba lagi sebentar ya, atau langsung hubungi kami via WhatsApp!",
-      }),
+      body: JSON.stringify({ reply: `❌ DEBUG ERROR: ${err.message}` }),
     };
   }
 };
